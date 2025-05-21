@@ -14,12 +14,7 @@ const db = admin.firestore();
 
 const app = express();
 
-// Habilita CORS para todos (ajuste para produção se quiser restringir domínios)
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type'],
-}));
+
 
 app.use(express.json());
 
