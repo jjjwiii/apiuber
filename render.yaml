@@ -3,22 +3,27 @@ const admin = require('firebase-admin');
 const { getDistance } = require('geolib');
 const cors = require('cors');
 
-// Inicializa Firebase Admin (usa credenciais padrão do ambiente)
+// Inicializa Firebase Admin com JSON da variável de ambiente
+const serviceAccount = JSON.parse(process.env.FIREBASE_CONFIG);
+
 admin.initializeApp({
-  credential: admin.credential.applicationDefault(),
+  credential: admin.credential.cert(serviceAccount),
 });
+
 const db = admin.firestore();
 
-
 const app = express();
+
+// Habilita CORS para todos (ajuste para produção se quiser restringir domínios)
 app.use(cors({
-  origin: '*', // ou especifique o domínio em produção
+  origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],
 }));
+
 app.use(express.json());
 
-// Função que espera resposta do motorista (aceitar ou recusar)
+// Espera a resposta do motorista (aceita ou recusa)
 function aguardarRespostaMotorista(corridaRef, motoristaId, segundos = 15) {
   return new Promise((resolve) => {
     const unsubscribe = corridaRef.onSnapshot((doc) => {
@@ -33,7 +38,6 @@ function aguardarRespostaMotorista(corridaRef, motoristaId, segundos = 15) {
       }
     });
 
-    // Timeout para não ficar esperando indefinidamente
     setTimeout(() => {
       unsubscribe();
       resolve(false);
@@ -41,11 +45,10 @@ function aguardarRespostaMotorista(corridaRef, motoristaId, segundos = 15) {
   });
 }
 
-// Função principal que busca motorista mais próximo
+// Busca o motorista mais próximo
 async function buscarMotoristaProximo(corridaId, origem) {
   const corridaRef = db.collection('corridas').doc(corridaId);
 
-  // Buscar motoristas online e disponíveis
   const snapshot = await db.collection('drivers')
     .where('isOnline', '==', true)
     .where('analise', '==', false)
@@ -57,7 +60,6 @@ async function buscarMotoristaProximo(corridaId, origem) {
     return;
   }
 
-  // Calcular distâncias
   const motoristasComDistancia = snapshot.docs.map(doc => {
     const data = doc.data();
     const distancia = getDistance(origem, data.location); // em metros
@@ -68,7 +70,6 @@ async function buscarMotoristaProximo(corridaId, origem) {
     };
   });
 
-  // Ordenar por distância
   motoristasComDistancia.sort((a, b) => a.distancia - b.distancia);
 
   const tentados = [];
@@ -77,12 +78,10 @@ async function buscarMotoristaProximo(corridaId, origem) {
     tentados.push(motorista.id);
     console.log(`Enviando corrida para motorista ${motorista.id}...`);
 
-    // Marcar o motorista como em análise
     await db.collection('drivers').doc(motorista.id).update({ analise: true });
 
-    // Atualizar corrida com motorista atual
     await corridaRef.update({
-      driverRef: motorista.id,
+      motorista_id_atual: motorista.id,
       motoristas_tentados: tentados,
       status: 'aguardando_motorista'
     });
@@ -98,19 +97,14 @@ async function buscarMotoristaProximo(corridaId, origem) {
     }
   }
 
-  // Nenhum motorista aceitou
   await corridaRef.update({ status: 'sem_motoristas' });
   console.log('Todos motoristas recusaram ou não responderam.');
 }
 
-// Rota HTTP para disparar a busca (chame essa rota via POST)
-// Exemplo JSON do body:
-// {
-//   "corridaId": "id_da_corrida",
-//   "origem": { "latitude": -23.5, "longitude": -46.6 }
-// }
+// Endpoint da API
 app.post('/buscar-motorista-proximo', async (req, res) => {
   const { corridaId, origem } = req.body;
+
   if (!corridaId || !origem || !origem.latitude || !origem.longitude) {
     return res.status(400).json({ error: 'Parâmetros inválidos' });
   }
@@ -124,7 +118,6 @@ app.post('/buscar-motorista-proximo', async (req, res) => {
   }
 });
 
-// Start do servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
